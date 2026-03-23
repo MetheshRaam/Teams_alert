@@ -16,8 +16,8 @@
 <p id="status">Waiting...</p>
 
 <label>Sensitivity:</label>
-<input type="range" min="2000" max="10000" value="5000" id="sens">
-<p>Value: <span id="val">5000</span></p>
+<input type="range" min="1000" max="8000" value="3000" id="sens">
+<p>Value: <span id="val">3000</span></p>
 
 <audio id="alarm" src="alarm.mp3"></audio>
 
@@ -36,11 +36,18 @@ async function loadReferenceSound() {
     const arrayBuffer = await response.arrayBuffer();
     const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
 
-    const analyser = audioContext.createAnalyser();
-    const source = audioContext.createBufferSource();
+    const offlineContext = new OfflineAudioContext(1, audioBuffer.length, audioBuffer.sampleRate);
+    const source = offlineContext.createBufferSource();
     source.buffer = audioBuffer;
+
+    const analyser = offlineContext.createAnalyser();
+    analyser.fftSize = 2048;
+
     source.connect(analyser);
-    analyser.connect(audioContext.destination);
+    analyser.connect(offlineContext.destination);
+    source.start(0);
+
+    await offlineContext.startRendering();
 
     let data = new Uint8Array(analyser.frequencyBinCount);
     analyser.getByteFrequencyData(data);
@@ -57,6 +64,7 @@ async function startListening() {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         const mic = audioContext.createMediaStreamSource(stream);
         const analyser = audioContext.createAnalyser();
+        analyser.fftSize = 2048;
         mic.connect(analyser);
 
         let liveData = new Uint8Array(analyser.frequencyBinCount);
@@ -65,13 +73,19 @@ async function startListening() {
             analyser.getByteFrequencyData(liveData);
 
             let diff = 0;
+            let volume = 0;
+
             for (let i = 0; i < liveData.length; i++) {
                 diff += Math.abs(liveData[i] - referenceSpectrum[i]);
+                volume += liveData[i];
             }
+
+            diff = diff / liveData.length;
+            volume = volume / liveData.length;
 
             let sensitivity = document.getElementById("sens").value;
 
-            if (diff < sensitivity && canTrigger) {
+            if (diff < sensitivity && volume > 25 && canTrigger) {
                 canTrigger = false;
                 document.getElementById("status").innerText = "Teams Notification Detected!";
 
@@ -83,7 +97,7 @@ async function startListening() {
                 setTimeout(() => {
                     canTrigger = true;
                     document.getElementById("status").innerText = "Listening...";
-                }, 10000);
+                }, 15000);
             }
 
             requestAnimationFrame(detect);
